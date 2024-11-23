@@ -299,71 +299,134 @@ static const unsigned char P_permutation_table[] = {
     18, 12, 29, 5, 21, 10, 3, 24,
 };
 
+static const struct {
+    unsigned char byte_index;  // 预计算好的字节索引
+    unsigned char mask;        // 预计算好的位掩码
+    unsigned char output_mask; // 预计算好的输出掩码
+} E_LOOKUP[48] = {
+    // 第1字节 (bits 1-8)
+    {3, 0x01, 0x80}, // bit 32
+    {0, 0x80, 0x40}, // bit 1
+    {0, 0x40, 0x20}, // bit 2
+    {0, 0x20, 0x10}, // bit 3
+    {0, 0x10, 0x08}, // bit 4
+    {0, 0x08, 0x04}, // bit 5
+    {0, 0x10, 0x02}, // bit 4
+    {0, 0x08, 0x01}, // bit 5
+
+    // 第2字节 (bits 9-16)
+    {0, 0x04, 0x80}, // bit 6
+    {0, 0x02, 0x40}, // bit 7
+    {0, 0x01, 0x20}, // bit 8
+    {1, 0x80, 0x10}, // bit 9
+    {0, 0x01, 0x08}, // bit 8
+    {1, 0x80, 0x04}, // bit 9
+    {1, 0x40, 0x02}, // bit 10
+    {1, 0x20, 0x01}, // bit 11
+
+    // 第3字节 (bits 17-24)
+    {1, 0x10, 0x80}, // bit 12
+    {1, 0x08, 0x40}, // bit 13
+    {1, 0x10, 0x20}, // bit 12
+    {1, 0x08, 0x10}, // bit 13
+    {1, 0x04, 0x08}, // bit 14
+    {1, 0x02, 0x04}, // bit 15
+    {1, 0x01, 0x02}, // bit 16
+    {2, 0x80, 0x01}, // bit 17
+
+    // 第4字节 (bits 25-32)
+    {1, 0x01, 0x80}, // bit 16
+    {2, 0x80, 0x40}, // bit 17
+    {2, 0x40, 0x20}, // bit 18
+    {2, 0x20, 0x10}, // bit 19
+    {2, 0x10, 0x08}, // bit 20
+    {2, 0x08, 0x04}, // bit 21
+    {2, 0x10, 0x02}, // bit 20
+    {2, 0x08, 0x01}, // bit 21
+
+    // 第5字节 (bits 33-40)
+    {2, 0x04, 0x80}, // bit 22
+    {2, 0x02, 0x40}, // bit 23
+    {2, 0x01, 0x20}, // bit 24
+    {3, 0x80, 0x10}, // bit 25
+    {2, 0x01, 0x08}, // bit 24
+    {3, 0x80, 0x04}, // bit 25
+    {3, 0x40, 0x02}, // bit 26
+    {3, 0x20, 0x01}, // bit 27
+
+    // 第6字节 (bits 41-48)
+    {3, 0x10, 0x80}, // bit 28
+    {3, 0x08, 0x40}, // bit 29
+    {3, 0x10, 0x20}, // bit 28
+    {3, 0x08, 0x10}, // bit 29
+    {3, 0x04, 0x08}, // bit 30
+    {3, 0x02, 0x04}, // bit 31
+    {3, 0x01, 0x02}, // bit 32
+    {0, 0x80, 0x01}  // bit 1
+};
+
+static const struct {
+    unsigned char byte_index;    // sbox_out中的字节索引
+    unsigned char input_mask;    //          
+    unsigned char byte_out;      // right输出字节索引
+    unsigned char output_mask;   // 输出位掩码
+} P_LOOKUP[32] = {
+    {1, 0x01, 0, 0x80}, // bit 16 -> bit 1
+    {0, 0x02, 0, 0x40}, // bit 7 -> bit 2
+    {2, 0x10, 0, 0x20}, // bit 20 -> bit 3
+    {2, 0x08, 0, 0x10}, // bit 21 -> bit 4
+    {3, 0x08, 0, 0x08}, // bit 29 -> bit 5
+    {1, 0x10, 0, 0x04}, // bit 12 -> bit 6
+    {3, 0x10, 0, 0x02}, // bit 28 -> bit 7
+    {2, 0x80, 0, 0x01}, // bit 17 -> bit 8
+    {0, 0x80, 1, 0x80}, // bit 1 -> bit 9
+    {1, 0x02, 1, 0x40}, // bit 15 -> bit 10
+    {2, 0x02, 1, 0x20}, // bit 23 -> bit 11
+    {3, 0x40, 1, 0x10}, // bit 26 -> bit 12
+    {0, 0x08, 1, 0x08}, // bit 5 -> bit 13
+    {2, 0x40, 1, 0x04}, // bit 18 -> bit 14
+    {3, 0x02, 1, 0x02}, // bit 31 -> bit 15
+    {1, 0x40, 1, 0x01}, // bit 10 -> bit 16
+    {0, 0x40, 2, 0x80}, // bit 2 -> bit 17
+    {0, 0x01, 2, 0x40}, // bit 8 -> bit 18
+    {2, 0x01, 2, 0x20}, // bit 24 -> bit 19
+    {1, 0x04, 2, 0x10}, // bit 14 -> bit 20
+    {3, 0x01, 2, 0x08}, // bit 32 -> bit 21
+    {3, 0x20, 2, 0x04}, // bit 27 -> bit 22
+    {0, 0x20, 2, 0x02}, // bit 3 -> bit 23
+    {1, 0x80, 2, 0x01}, // bit 9 -> bit 24
+    {2, 0x20, 3, 0x80}, // bit 19 -> bit 25
+    {1, 0x08, 3, 0x40}, // bit 13 -> bit 26
+    {3, 0x04, 3, 0x20}, // bit 30 -> bit 27
+    {0, 0x04, 3, 0x10}, // bit 6 -> bit 28
+    {2, 0x04, 3, 0x08}, // bit 22 -> bit 29
+    {1, 0x20, 3, 0x04}, // bit 11 -> bit 30
+    {0, 0x10, 3, 0x02}, // bit 4 -> bit 31
+    {3, 0x80, 3, 0x01}, // bit 25 -> bit 32
+};
+
 static void f_function(unsigned char *right, unsigned char *subkey) {
     unsigned char expanded[6] = {0};
     unsigned char sbox_out[4] = {0};
     
+    // 使用预计算表进行扩展置换 - 展开循环
+    #define E_LOOKUP_ROUND(i) \
+        if(right[E_LOOKUP[i].byte_index] & E_LOOKUP[i].mask) \
+            expanded[i/8] |= E_LOOKUP[i].output_mask;
 
-    // 基于E_expansion_table展开计算
-    // 第1字节 (bits 1-8)
-    expanded[0] |= (right[E_expansion_table[0] >> 3] & (0x80 >> (E_expansion_table[0] & 7))) ? 0x80 : 0;
-    expanded[0] |= (right[E_expansion_table[1] >> 3] & (0x80 >> (E_expansion_table[1] & 7))) ? 0x40 : 0;
-    expanded[0] |= (right[E_expansion_table[2] >> 3] & (0x80 >> (E_expansion_table[2] & 7))) ? 0x20 : 0;
-    expanded[0] |= (right[E_expansion_table[3] >> 3] & (0x80 >> (E_expansion_table[3] & 7))) ? 0x10 : 0;
-    expanded[0] |= (right[E_expansion_table[4] >> 3] & (0x80 >> (E_expansion_table[4] & 7))) ? 0x08 : 0;
-    expanded[0] |= (right[E_expansion_table[5] >> 3] & (0x80 >> (E_expansion_table[5] & 7))) ? 0x04 : 0;
-    expanded[0] |= (right[E_expansion_table[6] >> 3] & (0x80 >> (E_expansion_table[6] & 7))) ? 0x02 : 0;
-    expanded[0] |= (right[E_expansion_table[7] >> 3] & (0x80 >> (E_expansion_table[7] & 7))) ? 0x01 : 0;
-
-    // 第2字节 (bits 9-16)
-    expanded[1] |= (right[E_expansion_table[8] >> 3] & (0x80 >> (E_expansion_table[8] & 7))) ? 0x80 : 0;
-    expanded[1] |= (right[E_expansion_table[9] >> 3] & (0x80 >> (E_expansion_table[9] & 7))) ? 0x40 : 0;
-    expanded[1] |= (right[E_expansion_table[10] >> 3] & (0x80 >> (E_expansion_table[10] & 7))) ? 0x20 : 0;
-    expanded[1] |= (right[E_expansion_table[11] >> 3] & (0x80 >> (E_expansion_table[11] & 7))) ? 0x10 : 0;
-    expanded[1] |= (right[E_expansion_table[12] >> 3] & (0x80 >> (E_expansion_table[12] & 7))) ? 0x08 : 0;
-    expanded[1] |= (right[E_expansion_table[13] >> 3] & (0x80 >> (E_expansion_table[13] & 7))) ? 0x04 : 0;
-    expanded[1] |= (right[E_expansion_table[14] >> 3] & (0x80 >> (E_expansion_table[14] & 7))) ? 0x02 : 0;
-    expanded[1] |= (right[E_expansion_table[15] >> 3] & (0x80 >> (E_expansion_table[15] & 7))) ? 0x01 : 0;
-
-    // 第3字节 (bits 17-24)
-    expanded[2] |= (right[E_expansion_table[16] >> 3] & (0x80 >> (E_expansion_table[16] & 7))) ? 0x80 : 0;
-    expanded[2] |= (right[E_expansion_table[17] >> 3] & (0x80 >> (E_expansion_table[17] & 7))) ? 0x40 : 0;
-    expanded[2] |= (right[E_expansion_table[18] >> 3] & (0x80 >> (E_expansion_table[18] & 7))) ? 0x20 : 0;
-    expanded[2] |= (right[E_expansion_table[19] >> 3] & (0x80 >> (E_expansion_table[19] & 7))) ? 0x10 : 0;
-    expanded[2] |= (right[E_expansion_table[20] >> 3] & (0x80 >> (E_expansion_table[20] & 7))) ? 0x08 : 0;
-    expanded[2] |= (right[E_expansion_table[21] >> 3] & (0x80 >> (E_expansion_table[21] & 7))) ? 0x04 : 0;
-    expanded[2] |= (right[E_expansion_table[22] >> 3] & (0x80 >> (E_expansion_table[22] & 7))) ? 0x02 : 0;
-    expanded[2] |= (right[E_expansion_table[23] >> 3] & (0x80 >> (E_expansion_table[23] & 7))) ? 0x01 : 0;
-
-    // 第4字节 (bits 25-32)
-    expanded[3] |= (right[E_expansion_table[24] >> 3] & (0x80 >> (E_expansion_table[24] & 7))) ? 0x80 : 0;
-    expanded[3] |= (right[E_expansion_table[25] >> 3] & (0x80 >> (E_expansion_table[25] & 7))) ? 0x40 : 0;
-    expanded[3] |= (right[E_expansion_table[26] >> 3] & (0x80 >> (E_expansion_table[26] & 7))) ? 0x20 : 0;
-    expanded[3] |= (right[E_expansion_table[27] >> 3] & (0x80 >> (E_expansion_table[27] & 7))) ? 0x10 : 0;
-    expanded[3] |= (right[E_expansion_table[28] >> 3] & (0x80 >> (E_expansion_table[28] & 7))) ? 0x08 : 0;
-    expanded[3] |= (right[E_expansion_table[29] >> 3] & (0x80 >> (E_expansion_table[29] & 7))) ? 0x04 : 0;
-    expanded[3] |= (right[E_expansion_table[30] >> 3] & (0x80 >> (E_expansion_table[30] & 7))) ? 0x02 : 0;
-    expanded[3] |= (right[E_expansion_table[31] >> 3] & (0x80 >> (E_expansion_table[31] & 7))) ? 0x01 : 0;
-
-    // 第5字节 (bits 33-40)
-    expanded[4] |= (right[E_expansion_table[32] >> 3] & (0x80 >> (E_expansion_table[32] & 7))) ? 0x80 : 0;
-    expanded[4] |= (right[E_expansion_table[33] >> 3] & (0x80 >> (E_expansion_table[33] & 7))) ? 0x40 : 0;
-    expanded[4] |= (right[E_expansion_table[34] >> 3] & (0x80 >> (E_expansion_table[34] & 7))) ? 0x20 : 0;
-    expanded[4] |= (right[E_expansion_table[35] >> 3] & (0x80 >> (E_expansion_table[35] & 7))) ? 0x10 : 0;
-    expanded[4] |= (right[E_expansion_table[36] >> 3] & (0x80 >> (E_expansion_table[36] & 7))) ? 0x08 : 0;
-    expanded[4] |= (right[E_expansion_table[37] >> 3] & (0x80 >> (E_expansion_table[37] & 7))) ? 0x04 : 0;
-    expanded[4] |= (right[E_expansion_table[38] >> 3] & (0x80 >> (E_expansion_table[38] & 7))) ? 0x02 : 0;
-    expanded[4] |= (right[E_expansion_table[39] >> 3] & (0x80 >> (E_expansion_table[39] & 7))) ? 0x01 : 0;
-
-    // 第6字节 (bits 41-48)
-    expanded[5] |= (right[E_expansion_table[40] >> 3] & (0x80 >> (E_expansion_table[40] & 7))) ? 0x80 : 0;
-    expanded[5] |= (right[E_expansion_table[41] >> 3] & (0x80 >> (E_expansion_table[41] & 7))) ? 0x40 : 0;
-    expanded[5] |= (right[E_expansion_table[42] >> 3] & (0x80 >> (E_expansion_table[42] & 7))) ? 0x20 : 0;
-    expanded[5] |= (right[E_expansion_table[43] >> 3] & (0x80 >> (E_expansion_table[43] & 7))) ? 0x10 : 0;
-    expanded[5] |= (right[E_expansion_table[44] >> 3] & (0x80 >> (E_expansion_table[44] & 7))) ? 0x08 : 0;
-    expanded[5] |= (right[E_expansion_table[45] >> 3] & (0x80 >> (E_expansion_table[45] & 7))) ? 0x04 : 0;
-    expanded[5] |= (right[E_expansion_table[46] >> 3] & (0x80 >> (E_expansion_table[46] & 7))) ? 0x02 : 0;
-    expanded[5] |= (right[E_expansion_table[47] >> 3] & (0x80 >> (E_expansion_table[47] & 7))) ? 0x01 : 0;
+    // 替换原来的for循环
+    E_LOOKUP_ROUND(0);  E_LOOKUP_ROUND(1);  E_LOOKUP_ROUND(2);  E_LOOKUP_ROUND(3);
+    E_LOOKUP_ROUND(4);  E_LOOKUP_ROUND(5);  E_LOOKUP_ROUND(6);  E_LOOKUP_ROUND(7);
+    E_LOOKUP_ROUND(8);  E_LOOKUP_ROUND(9);  E_LOOKUP_ROUND(10); E_LOOKUP_ROUND(11);
+    E_LOOKUP_ROUND(12); E_LOOKUP_ROUND(13); E_LOOKUP_ROUND(14); E_LOOKUP_ROUND(15);
+    E_LOOKUP_ROUND(16); E_LOOKUP_ROUND(17); E_LOOKUP_ROUND(18); E_LOOKUP_ROUND(19);
+    E_LOOKUP_ROUND(20); E_LOOKUP_ROUND(21); E_LOOKUP_ROUND(22); E_LOOKUP_ROUND(23);
+    E_LOOKUP_ROUND(24); E_LOOKUP_ROUND(25); E_LOOKUP_ROUND(26); E_LOOKUP_ROUND(27);
+    E_LOOKUP_ROUND(28); E_LOOKUP_ROUND(29); E_LOOKUP_ROUND(30); E_LOOKUP_ROUND(31);
+    E_LOOKUP_ROUND(32); E_LOOKUP_ROUND(33); E_LOOKUP_ROUND(34); E_LOOKUP_ROUND(35);
+    E_LOOKUP_ROUND(36); E_LOOKUP_ROUND(37); E_LOOKUP_ROUND(38); E_LOOKUP_ROUND(39);
+    E_LOOKUP_ROUND(40); E_LOOKUP_ROUND(41); E_LOOKUP_ROUND(42); E_LOOKUP_ROUND(43);
+    E_LOOKUP_ROUND(44); E_LOOKUP_ROUND(45); E_LOOKUP_ROUND(46); E_LOOKUP_ROUND(47);
 
     // XOR with subkey
     for(int i = 0; i < 6; i++) {
@@ -390,12 +453,17 @@ static void f_function(unsigned char *right, unsigned char *subkey) {
     }
     memset(right, 0, 4);
     
-    // P-box permutation
-    for(int i = 0; i < 32; i++) {
-        if(sbox_out[P_permutation_table[i] >> 3] & (0x80 >> (P_permutation_table[i] & 7)))
-            right[i >> 3] |= 0x80 >> (i & 7);
-    }
+    // P-box permutation - 展开循环
+    #define P_LOOKUP_ROUND(i) \
+        if(sbox_out[P_LOOKUP[i].byte_index] & P_LOOKUP[i].input_mask) \
+            right[P_LOOKUP[i].byte_out] |= P_LOOKUP[i].output_mask;
+
+    P_LOOKUP_ROUND(0);  P_LOOKUP_ROUND(1);  P_LOOKUP_ROUND(2);  P_LOOKUP_ROUND(3);
+    P_LOOKUP_ROUND(4);  P_LOOKUP_ROUND(5);  P_LOOKUP_ROUND(6);  P_LOOKUP_ROUND(7);
+    P_LOOKUP_ROUND(8);  P_LOOKUP_ROUND(9);  P_LOOKUP_ROUND(10); P_LOOKUP_ROUND(11);
+    P_LOOKUP_ROUND(12); P_LOOKUP_ROUND(13); P_LOOKUP_ROUND(14); P_LOOKUP_ROUND(15);
+    P_LOOKUP_ROUND(16); P_LOOKUP_ROUND(17); P_LOOKUP_ROUND(18); P_LOOKUP_ROUND(19);
+    P_LOOKUP_ROUND(20); P_LOOKUP_ROUND(21); P_LOOKUP_ROUND(22); P_LOOKUP_ROUND(23);
+    P_LOOKUP_ROUND(24); P_LOOKUP_ROUND(25); P_LOOKUP_ROUND(26); P_LOOKUP_ROUND(27);
+    P_LOOKUP_ROUND(28); P_LOOKUP_ROUND(29); P_LOOKUP_ROUND(30); P_LOOKUP_ROUND(31);
 }
-
-
-
