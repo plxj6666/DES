@@ -25,16 +25,16 @@ static const unsigned char FP[] = {
 };
 
 // Expansion Table
-static const unsigned char E[] = {
-    32, 1, 2, 3, 4, 5,
-    4, 5, 6, 7, 8, 9,
-    8, 9, 10, 11, 12, 13,
-    12, 13, 14, 15, 16, 17,
-    16, 17, 18, 19, 20, 21,
-    20, 21, 22, 23, 24, 25,
-    24, 25, 26, 27, 28, 29,
-    28, 29, 30, 31, 32, 1
-};
+// static const unsigned char E[] = {
+//     32, 1, 2, 3, 4, 5,
+//     4, 5, 6, 7, 8, 9,
+//     8, 9, 10, 11, 12, 13,
+//     12, 13, 14, 15, 16, 17,
+//     16, 17, 18, 19, 20, 21,
+//     20, 21, 22, 23, 24, 25,
+//     24, 25, 26, 27, 28, 29,
+//     28, 29, 30, 31, 32, 1
+// };
 
 // // S-boxes
 // static const unsigned char S[8][64] = {
@@ -89,12 +89,12 @@ static const unsigned char E[] = {
 // };
 
 // P-box permutation
-static const unsigned char P[] = {
-    16, 7, 20, 21, 29, 12, 28, 17,
-    1, 15, 23, 26, 5, 18, 31, 10,
-    2, 8, 24, 14, 32, 27, 3, 9,
-    19, 13, 30, 6, 22, 11, 4, 25
-};
+// static const unsigned char P[] = {
+//     16, 7, 20, 21, 29, 12, 28, 17,
+//     1, 15, 23, 26, 5, 18, 31, 10,
+//     2, 8, 24, 14, 32, 27, 3, 9,
+//     19, 13, 30, 6, 22, 11, 4, 25
+// };
 
 // Key schedule tables
 static const unsigned char PC1[] = {
@@ -255,13 +255,12 @@ void des_decrypt_block(const unsigned char *input,
 
 
 
-static void rotate_left(unsigned char *data, int len, int count) {
+static inline void rotate_left(unsigned char *data, int len, int count) {
     unsigned char temp[256];
     memcpy(temp, data, count);
     memmove(data, data + count, len - count);
     memcpy(data + len - count, temp, count);
 }
-
 
 // 预计算S盒结果
 static const unsigned char SBOX_RESULT[8][64] = {
@@ -275,13 +274,34 @@ static const unsigned char SBOX_RESULT[8][64] = {
 {13, 1, 2, 15, 8, 13, 4, 8, 6, 10, 15, 3, 11, 7, 1, 4, 10, 12, 9, 5, 3, 6, 14, 11, 5, 0, 0, 14, 12, 9, 7, 2, 7, 2, 11, 1, 4, 14, 1, 7, 9, 4, 12, 10, 14, 8, 2, 13, 0, 15, 6, 12, 10, 9, 13, 0, 15, 3, 3, 5, 5, 6, 8, 11}
 };
 
+// 优化f_function中的S盒查找
+static inline unsigned char sbox_lookup(int box, unsigned char input) {
+    return SBOX_RESULT[box][input];
+}
+
+static const unsigned char E_expansion_table[] = {
+    31, 0, 1, 2, 3, 4, 3, 4,
+    5, 6, 7, 8, 7, 8, 9, 10,
+    11, 12, 11, 12, 13, 14, 15, 16,
+    15, 16, 17, 18, 19, 20, 19, 20,
+    21, 22, 23, 24, 23, 24, 25, 26,
+    27, 28, 27, 28, 29, 30, 31, 0,
+};
+
+static const unsigned char P_permutation_table[] = {
+    15, 6, 19, 20, 28, 11, 27, 16,
+    0, 14, 22, 25, 4, 17, 30, 9,
+    1, 7, 23, 13, 31, 26, 2, 8,
+    18, 12, 29, 5, 21, 10, 3, 24,
+};
+
 static void f_function(unsigned char *right, unsigned char *subkey) {
     unsigned char expanded[6] = {0};
     unsigned char sbox_out[4] = {0};
     
     // Expansion
     for(int i = 0; i < 48; i++) {
-        int src_bit = E[i] - 1;
+        int src_bit = E_expansion_table[i];
         if(right[src_bit >> 3] & (0x80 >> (src_bit & 7)))
             expanded[i/8] |= 0x80 >> (i & 7);
     }
@@ -306,8 +326,8 @@ static void f_function(unsigned char *right, unsigned char *subkey) {
                       (expanded[byte_index + 1] >> (10 - bit_offset));
         }
         
-        // 使用预计算的S盒结果
-        unsigned char sbox_val = SBOX_RESULT[i][sixbits];
+        // 使用内联函数进行S盒查找
+        unsigned char sbox_val = sbox_lookup(i, sixbits);
         
         sbox_out[i/2] |= (i % 2) ? sbox_val : (sbox_val << 4);
     }
@@ -317,7 +337,7 @@ static void f_function(unsigned char *right, unsigned char *subkey) {
     
     // P-box permutation
     for(int i = 0; i < 32; i++) {
-        int src_bit = P[i] - 1;
+        int src_bit = P_permutation_table[i];
         if(sbox_out[src_bit >> 3] & (0x80 >> (src_bit & 7)))
             right[i >> 3] |= 0x80 >> (i & 7);
     }
