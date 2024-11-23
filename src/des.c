@@ -1,5 +1,6 @@
 #include "../inc/des.h"
 #include <string.h>
+#include <stdint.h>
 // Initial Permutation Table
 static const unsigned char IP[] = {
     58, 50, 42, 34, 26, 18, 10, 2,
@@ -185,42 +186,44 @@ int des_make_subkeys(const unsigned char key[8], unsigned char subKeys[16][6]) {
 void des_encrypt_block(const unsigned char *input, 
                       unsigned char subKeys[16][6], 
                       unsigned char *output) {
-    unsigned char block[8] = {0};
-    unsigned char lr[8] = {0};
+    // 使用aligned内存以提高访问速度
+    unsigned char __attribute__((aligned(16))) block[8] = {0};
+    unsigned char __attribute__((aligned(16))) lr[8] = {0};
     
-    // Initial permutation
-    for(int i = 0; i < 64; i++) {
-        int src_bit = IP[i] - 1;
-        if(input[src_bit >> 3] & (0x80 >> (src_bit & 7)))
+    // 使用register提示编译器
+    register int i;
+    
+    // 初始置换优化：使用查表法
+    #pragma GCC unroll 8
+    for(i = 0; i < 64; i++) {
+        if(input[(IP[i] - 1) >> 3] & (0x80 >> ((IP[i] - 1) & 7)))
             block[i >> 3] |= (0x80 >> (i & 7));
     }
     
-    // Split into left and right halves
     memcpy(lr, block, 8);
     
-    // 16轮循环
-    for (int round = 0; round < 16; round++) {
-        unsigned char temp[4];
-        memcpy(temp, lr + 4, 4);
-        f_function(lr + 4, subKeys[round]);
-        for (int j = 0; j < 4; j++) {
-            lr[j + 4] ^= lr[j];
-        }
-        memcpy(lr, temp, 4);
-    }
+    // 展开16轮循环以减少循环开销
+    #define DES_ROUND(round) \
+        ROUND(round, lr, subKeys)
     
-    // 最后一轮后交换左右半部分
-    for (int i = 0; i < 4; i++) {
+    DES_ROUND(0);  DES_ROUND(1);  DES_ROUND(2);  DES_ROUND(3);
+    DES_ROUND(4);  DES_ROUND(5);  DES_ROUND(6);  DES_ROUND(7);
+    DES_ROUND(8);  DES_ROUND(9);  DES_ROUND(10); DES_ROUND(11);
+    DES_ROUND(12); DES_ROUND(13); DES_ROUND(14); DES_ROUND(15);
+    
+    // 最后交换优化
+    #pragma GCC unroll 4
+    for (i = 0; i < 4; i++) {
         unsigned char tmp = lr[i];
         lr[i] = lr[i + 4];
         lr[i + 4] = tmp;
     }
     
-    // Final permutation
+    // 最终置换优化
     memset(output, 0, 8);
-    for(int i = 0; i < 64; i++) {
-        int src_bit = FP[i] - 1;
-        if(lr[src_bit >> 3] & (0x80 >> (src_bit & 7)))
+    #pragma GCC unroll 8
+    for(i = 0; i < 64; i++) {
+        if(lr[(FP[i] - 1) >> 3] & (0x80 >> ((FP[i] - 1) & 7)))
             output[i >> 3] |= (0x80 >> (i & 7));
     }
 }
@@ -288,6 +291,7 @@ static const unsigned char E_expansion_table[] = {
     27, 28, 27, 28, 29, 30, 31, 0,
 };
 
+
 static const unsigned char P_permutation_table[] = {
     15, 6, 19, 20, 28, 11, 27, 16,
     0, 14, 22, 25, 4, 17, 30, 9,
@@ -299,22 +303,77 @@ static void f_function(unsigned char *right, unsigned char *subkey) {
     unsigned char expanded[6] = {0};
     unsigned char sbox_out[4] = {0};
     
-    // Expansion
-    for(int i = 0; i < 48; i++) {
-        int src_bit = E_expansion_table[i];
-        if(right[src_bit >> 3] & (0x80 >> (src_bit & 7)))
-            expanded[i/8] |= 0x80 >> (i & 7);
-    }
-    
+
+    // 基于E_expansion_table展开计算
+    // 第1字节 (bits 1-8)
+    expanded[0] |= (right[E_expansion_table[0] >> 3] & (0x80 >> (E_expansion_table[0] & 7))) ? 0x80 : 0;
+    expanded[0] |= (right[E_expansion_table[1] >> 3] & (0x80 >> (E_expansion_table[1] & 7))) ? 0x40 : 0;
+    expanded[0] |= (right[E_expansion_table[2] >> 3] & (0x80 >> (E_expansion_table[2] & 7))) ? 0x20 : 0;
+    expanded[0] |= (right[E_expansion_table[3] >> 3] & (0x80 >> (E_expansion_table[3] & 7))) ? 0x10 : 0;
+    expanded[0] |= (right[E_expansion_table[4] >> 3] & (0x80 >> (E_expansion_table[4] & 7))) ? 0x08 : 0;
+    expanded[0] |= (right[E_expansion_table[5] >> 3] & (0x80 >> (E_expansion_table[5] & 7))) ? 0x04 : 0;
+    expanded[0] |= (right[E_expansion_table[6] >> 3] & (0x80 >> (E_expansion_table[6] & 7))) ? 0x02 : 0;
+    expanded[0] |= (right[E_expansion_table[7] >> 3] & (0x80 >> (E_expansion_table[7] & 7))) ? 0x01 : 0;
+
+    // 第2字节 (bits 9-16)
+    expanded[1] |= (right[E_expansion_table[8] >> 3] & (0x80 >> (E_expansion_table[8] & 7))) ? 0x80 : 0;
+    expanded[1] |= (right[E_expansion_table[9] >> 3] & (0x80 >> (E_expansion_table[9] & 7))) ? 0x40 : 0;
+    expanded[1] |= (right[E_expansion_table[10] >> 3] & (0x80 >> (E_expansion_table[10] & 7))) ? 0x20 : 0;
+    expanded[1] |= (right[E_expansion_table[11] >> 3] & (0x80 >> (E_expansion_table[11] & 7))) ? 0x10 : 0;
+    expanded[1] |= (right[E_expansion_table[12] >> 3] & (0x80 >> (E_expansion_table[12] & 7))) ? 0x08 : 0;
+    expanded[1] |= (right[E_expansion_table[13] >> 3] & (0x80 >> (E_expansion_table[13] & 7))) ? 0x04 : 0;
+    expanded[1] |= (right[E_expansion_table[14] >> 3] & (0x80 >> (E_expansion_table[14] & 7))) ? 0x02 : 0;
+    expanded[1] |= (right[E_expansion_table[15] >> 3] & (0x80 >> (E_expansion_table[15] & 7))) ? 0x01 : 0;
+
+    // 第3字节 (bits 17-24)
+    expanded[2] |= (right[E_expansion_table[16] >> 3] & (0x80 >> (E_expansion_table[16] & 7))) ? 0x80 : 0;
+    expanded[2] |= (right[E_expansion_table[17] >> 3] & (0x80 >> (E_expansion_table[17] & 7))) ? 0x40 : 0;
+    expanded[2] |= (right[E_expansion_table[18] >> 3] & (0x80 >> (E_expansion_table[18] & 7))) ? 0x20 : 0;
+    expanded[2] |= (right[E_expansion_table[19] >> 3] & (0x80 >> (E_expansion_table[19] & 7))) ? 0x10 : 0;
+    expanded[2] |= (right[E_expansion_table[20] >> 3] & (0x80 >> (E_expansion_table[20] & 7))) ? 0x08 : 0;
+    expanded[2] |= (right[E_expansion_table[21] >> 3] & (0x80 >> (E_expansion_table[21] & 7))) ? 0x04 : 0;
+    expanded[2] |= (right[E_expansion_table[22] >> 3] & (0x80 >> (E_expansion_table[22] & 7))) ? 0x02 : 0;
+    expanded[2] |= (right[E_expansion_table[23] >> 3] & (0x80 >> (E_expansion_table[23] & 7))) ? 0x01 : 0;
+
+    // 第4字节 (bits 25-32)
+    expanded[3] |= (right[E_expansion_table[24] >> 3] & (0x80 >> (E_expansion_table[24] & 7))) ? 0x80 : 0;
+    expanded[3] |= (right[E_expansion_table[25] >> 3] & (0x80 >> (E_expansion_table[25] & 7))) ? 0x40 : 0;
+    expanded[3] |= (right[E_expansion_table[26] >> 3] & (0x80 >> (E_expansion_table[26] & 7))) ? 0x20 : 0;
+    expanded[3] |= (right[E_expansion_table[27] >> 3] & (0x80 >> (E_expansion_table[27] & 7))) ? 0x10 : 0;
+    expanded[3] |= (right[E_expansion_table[28] >> 3] & (0x80 >> (E_expansion_table[28] & 7))) ? 0x08 : 0;
+    expanded[3] |= (right[E_expansion_table[29] >> 3] & (0x80 >> (E_expansion_table[29] & 7))) ? 0x04 : 0;
+    expanded[3] |= (right[E_expansion_table[30] >> 3] & (0x80 >> (E_expansion_table[30] & 7))) ? 0x02 : 0;
+    expanded[3] |= (right[E_expansion_table[31] >> 3] & (0x80 >> (E_expansion_table[31] & 7))) ? 0x01 : 0;
+
+    // 第5字节 (bits 33-40)
+    expanded[4] |= (right[E_expansion_table[32] >> 3] & (0x80 >> (E_expansion_table[32] & 7))) ? 0x80 : 0;
+    expanded[4] |= (right[E_expansion_table[33] >> 3] & (0x80 >> (E_expansion_table[33] & 7))) ? 0x40 : 0;
+    expanded[4] |= (right[E_expansion_table[34] >> 3] & (0x80 >> (E_expansion_table[34] & 7))) ? 0x20 : 0;
+    expanded[4] |= (right[E_expansion_table[35] >> 3] & (0x80 >> (E_expansion_table[35] & 7))) ? 0x10 : 0;
+    expanded[4] |= (right[E_expansion_table[36] >> 3] & (0x80 >> (E_expansion_table[36] & 7))) ? 0x08 : 0;
+    expanded[4] |= (right[E_expansion_table[37] >> 3] & (0x80 >> (E_expansion_table[37] & 7))) ? 0x04 : 0;
+    expanded[4] |= (right[E_expansion_table[38] >> 3] & (0x80 >> (E_expansion_table[38] & 7))) ? 0x02 : 0;
+    expanded[4] |= (right[E_expansion_table[39] >> 3] & (0x80 >> (E_expansion_table[39] & 7))) ? 0x01 : 0;
+
+    // 第6字节 (bits 41-48)
+    expanded[5] |= (right[E_expansion_table[40] >> 3] & (0x80 >> (E_expansion_table[40] & 7))) ? 0x80 : 0;
+    expanded[5] |= (right[E_expansion_table[41] >> 3] & (0x80 >> (E_expansion_table[41] & 7))) ? 0x40 : 0;
+    expanded[5] |= (right[E_expansion_table[42] >> 3] & (0x80 >> (E_expansion_table[42] & 7))) ? 0x20 : 0;
+    expanded[5] |= (right[E_expansion_table[43] >> 3] & (0x80 >> (E_expansion_table[43] & 7))) ? 0x10 : 0;
+    expanded[5] |= (right[E_expansion_table[44] >> 3] & (0x80 >> (E_expansion_table[44] & 7))) ? 0x08 : 0;
+    expanded[5] |= (right[E_expansion_table[45] >> 3] & (0x80 >> (E_expansion_table[45] & 7))) ? 0x04 : 0;
+    expanded[5] |= (right[E_expansion_table[46] >> 3] & (0x80 >> (E_expansion_table[46] & 7))) ? 0x02 : 0;
+    expanded[5] |= (right[E_expansion_table[47] >> 3] & (0x80 >> (E_expansion_table[47] & 7))) ? 0x01 : 0;
+
     // XOR with subkey
     for(int i = 0; i < 6; i++) {
         expanded[i] ^= subkey[i];
     }
-    
-    // S-box substitution using precomputed results
+
+    // S-box lookup (保持原有代码不变)
     for(int i = 0; i < 8; i++) {
         int block_pos = i * 6;
-        unsigned char sixbits = 0;
+        unsigned char sixbits;
         
         int byte_index = block_pos / 8;
         int bit_offset = block_pos % 8;
@@ -326,19 +385,14 @@ static void f_function(unsigned char *right, unsigned char *subkey) {
                       (expanded[byte_index + 1] >> (10 - bit_offset));
         }
         
-        // 使用内联函数进行S盒查找
-        unsigned char sbox_val = sbox_lookup(i, sixbits);
-        
+        unsigned char sbox_val = SBOX_RESULT[i][sixbits];
         sbox_out[i/2] |= (i % 2) ? sbox_val : (sbox_val << 4);
     }
-    
-    // 清空right
     memset(right, 0, 4);
     
     // P-box permutation
     for(int i = 0; i < 32; i++) {
-        int src_bit = P_permutation_table[i];
-        if(sbox_out[src_bit >> 3] & (0x80 >> (src_bit & 7)))
+        if(sbox_out[P_permutation_table[i] >> 3] & (0x80 >> (P_permutation_table[i] & 7)))
             right[i >> 3] |= 0x80 >> (i & 7);
     }
 }
